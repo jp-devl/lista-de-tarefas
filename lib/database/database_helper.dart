@@ -1,6 +1,6 @@
+
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -18,44 +18,62 @@ class DatabaseHelper {
     return _database!;
   }
 
-  Future<Database> _initDB(String filePath) async {
+  Future<Database> _initDB(String fileName) async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, filePath);
+    final path = join(dbPath, fileName);
 
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    return openDatabase(
+      path,
+      version: 1,
+      onCreate: _createDB,
+    );
   }
 
   Future<void> _createDB(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE tarefas(
+      CREATE TABLE tarefas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         descricao TEXT NOT NULL
       )
     ''');
   }
 
+  // Adicionar tarefa
   Future<int> inserirTarefa(String descricao) async {
     final db = await database;
 
-    return await db.insert('tarefas', {'descricao': descricao});
+    return db.insert(
+      'tarefas',
+      {'descricao': descricao},
+    );
   }
 
+  // Listar tarefas
   Future<List<Map<String, dynamic>>> listarTarefas() async {
     final db = await database;
 
-    return await db.query('tarefas');
+    return db.query(
+      'tarefas',
+      orderBy: 'id DESC',
+    );
   }
 
-  Future<void> removerTarefa(int id) async {
+  // Excluir tarefa pelo ID
+  Future<int> removerTarefa(int id) async {
     final db = await database;
 
-    await db.delete('tarefas', where: 'id = ?', whereArgs: [id]);
+    return db.delete(
+      'tarefas',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
+  // Atualizar tarefa pelo ID
   Future<int> atualizarTarefa(int id, String descricao) async {
     final db = await database;
 
-    return await db.update(
+    return db.update(
       'tarefas',
       {'descricao': descricao},
       where: 'id = ?',

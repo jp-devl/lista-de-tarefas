@@ -9,7 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  sqflite_common_ffi: ^2.4.0
+  http: ^1.6.0
+  sqflite: ^2.4.4+2
+  sqflite_common_ffi: ^2.4.4
 
 dev_dependencies:
   flutter_test:

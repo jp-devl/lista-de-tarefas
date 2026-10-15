@@ -1,18 +1,19 @@
-import 'package:flutter/material.dart';
-
-import 'segunda_tela.dart';
-
-import 'package:sqflite_common_ffi/sqflite_common_ffi.dart';
-
-import 'database/database_helper.dart';
-
 import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import 'database/database_helper.dart';
+import 'segunda_tela.dart';
+
 void main() {
-  if (Platform.isWindows) {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (Platform.isWindows || Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
+
   runApp(const MainApp());
 }
 
@@ -22,17 +23,19 @@ class MainApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      theme: ThemeData(
-        scaffoldBackgroundColor: const Color.fromARGB(
-          255,
-          234,
-          196,
-          196,
-        ), // redAccent
-      ),
       title: 'Lista de Tarefas',
       debugShowCheckedModeBanner: false,
-
+      theme: ThemeData(
+        scaffoldBackgroundColor: const Color(0xFFF5F5F5),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFF5F5F5),
+          foregroundColor: Colors.black,
+          centerTitle: true,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(foregroundColor: Colors.black),
+        ),
+      ),
       home: const HomePage(),
     );
   }
@@ -46,12 +49,13 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final TextEditingController tarefaController =
-      TextEditingController(); // Controlador para o campo de texto
-
-  // List<String> tarefas = []; // Lista para armazenar as tarefas
+  final TextEditingController tarefaController = TextEditingController();
 
   List<Map<String, dynamic>> tarefas = [];
+
+  int? idTarefaEmEdicao;
+  bool carregando = false;
+  bool carregandoLista = true;
 
   @override
   void initState() {
@@ -59,56 +63,143 @@ class _HomePageState extends State<HomePage> {
     carregarTarefas();
   }
 
+  @override
+  void dispose() {
+    tarefaController.dispose();
+    super.dispose();
+  }
+
   Future<void> carregarTarefas() async {
-    final dados = await DatabaseHelper.instance.listarTarefas();
+    try {
+      final dados = await DatabaseHelper.instance.listarTarefas();
+
+      if (!mounted) return;
+
+      setState(() {
+        tarefas = dados;
+        carregandoLista = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        carregandoLista = false;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao carregar tarefas: $e')));
+    }
+  }
+
+  Future<void> adicionarOuAtualizarTarefa() async {
+    final descricao = tarefaController.text.trim();
+
+    if (descricao.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Digite uma tarefa antes de continuar.')),
+      );
+      return;
+    }
+
+    if (carregando) return;
+
+    final estavaEditando = idTarefaEmEdicao != null;
+
     setState(() {
-      tarefas = dados;
+      carregando = true;
+    });
+
+    try {
+      if (estavaEditando) {
+        await DatabaseHelper.instance.atualizarTarefa(
+          idTarefaEmEdicao!,
+          descricao,
+        );
+      } else {
+        await DatabaseHelper.instance.inserirTarefa(descricao);
+      }
+
+      await carregarTarefas();
+
+      if (!mounted) return;
+
+      setState(() {
+        idTarefaEmEdicao = null;
+        tarefaController.clear();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            estavaEditando
+                ? 'Tarefa atualizada com sucesso!'
+                : 'Tarefa adicionada com sucesso!',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Erro ao salvar tarefa: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          carregando = false;
+        });
+      }
+    }
+  }
+
+  void editarTarefa(Map<String, dynamic> tarefa) {
+    setState(() {
+      idTarefaEmEdicao = tarefa['id'] as int;
+      tarefaController.text = tarefa['descricao'] as String;
     });
   }
 
-  int? indiceEdicao;
+  Future<void> removerTarefa(int id) async {
+    if (carregando) return;
 
-  Future<void> adicionarTarefa() async {
-    if (tarefaController.text.isEmpty) {
-      //SnackBar para informar que a tarefa não pode ser vazia
-      return; // Não adiciona tarefas vazias
+    try {
+      await DatabaseHelper.instance.removerTarefa(id);
+
+      if (!mounted) return;
+
+      if (idTarefaEmEdicao == id) {
+        setState(() {
+          idTarefaEmEdicao = null;
+          tarefaController.clear();
+        });
+      }
+
+      await carregarTarefas();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tarefa excluída com sucesso!')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Erro ao excluir tarefa: $e')));
     }
-
-    await DatabaseHelper.instance.inserirTarefa(tarefaController.text);
-    tarefaController.clear(); // Limpa o campo de texto após adicionar a tarefa
-
-    carregarTarefas();
   }
 
-  // void editarTarefa(int index) {
-  //   setState(() {
-  //     tarefaController.text = tarefas[index];
-  //     indiceEdicao = index;
-  //   });
-  // }
-
-  Future<void> removerTarefa(int index) async {
-    await DatabaseHelper.instance.removerTarefa(index);
-    carregarTarefas();
-  }
-
+  @override
   Widget build(BuildContext context) {
-    //Método responsável por construir a interface do usuário da página inicial
     return Scaffold(
       appBar: AppBar(
-        title: Text(
+        title: const Text(
           'Lista de Tarefas',
-          style: TextStyle(
-            color: const Color.fromARGB(255, 15, 14, 14),
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
         ),
-        centerTitle: true,
       ),
-
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             Row(
@@ -116,72 +207,103 @@ class _HomePageState extends State<HomePage> {
                 Expanded(
                   child: TextField(
                     controller: tarefaController,
+                    enabled: !carregando,
                     decoration: InputDecoration(
                       hintText: 'Digite uma tarefa',
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8.0),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                     ),
+                    onSubmitted: (_) {
+                      adicionarOuAtualizarTarefa();
+                    },
                   ),
                 ),
-                SizedBox(width: 8.0),
+                const SizedBox(width: 8),
                 ElevatedButton(
-                  onPressed: () {
-                    // Lógica para adicionar a tarefa
-                    adicionarTarefa();
-                  },
-                  child: Text(indiceEdicao == null ? 'Adicionar' : 'Atualizar'),
+                  onPressed: carregando ? null : adicionarOuAtualizarTarefa,
+                  child: carregando
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(
+                          idTarefaEmEdicao == null ? 'Adicionar' : 'Atualizar',
+                        ),
                 ),
               ],
             ),
-            SizedBox(height: 16.0),
+
+            const SizedBox(height: 16),
+
             Expanded(
-              child: ListView.builder(
-                itemCount: tarefas.length,
-                itemBuilder: (context, index) {
-                  return Card(
-                    child: ListTile(
-                      title: Text((tarefas[index]['descricao'])),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: Icon(Icons.delete),
-                            onPressed: () {
-                              // Lógica para remover a tarefa
-                              removerTarefa(tarefas[index]['id']);
-                            },
-                          ),
-                          IconButton(
-                            icon: Icon(Icons.edit),
-                            onPressed: () {
-                              // editarTarefa(index);
-                            },
-                          ),
-                        ],
+              child: carregandoLista
+                  ? const Center(child: CircularProgressIndicator())
+                  : tarefas.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Nenhuma tarefa cadastrada.',
+                        style: TextStyle(fontSize: 16),
                       ),
+                    )
+                  : ListView.builder(
+                      itemCount: tarefas.length,
+                      itemBuilder: (context, index) {
+                        final tarefa = tarefas[index];
+                        final id = tarefa['id'] as int;
+                        final descricao = tarefa['descricao'] as String;
+
+                        return Card(
+                          elevation: 2,
+                          child: ListTile(
+                            title: Text(descricao),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Editar tarefa',
+                                  icon: const Icon(
+                                    Icons.edit,
+                                    color: Colors.blue,
+                                  ),
+                                  onPressed: carregando
+                                      ? null
+                                      : () => editarTarefa(tarefa),
+                                ),
+                                IconButton(
+                                  tooltip: 'Excluir tarefa',
+                                  icon: const Icon(
+                                    Icons.delete,
+                                    color: Colors.red,
+                                  ),
+                                  onPressed: carregando
+                                      ? null
+                                      : () => removerTarefa(id),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
           ],
         ),
       ),
-      bottomNavigationBar: Row(
-        children: [
-          Expanded(
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const SegundaTela()),
-                );
-              },
-              child: const Text('Sobre'),
-            ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SegundaTela()),
+              );
+            },
+            child: const Text('Sobre'),
           ),
-        ],
+        ),
       ),
     );
   }
